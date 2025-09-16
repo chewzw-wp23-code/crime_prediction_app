@@ -6,7 +6,7 @@ import numpy as np
 # Load trained model
 @st.cache_resource
 def load_model():
-    return pickle.load(open('crime_prediction_model.pkl', 'rb'))
+    return pickle.load(open('crime_prediction_app.py'))
 
 model = load_model()
 
@@ -71,3 +71,4 @@ if st.sidebar.button("🔮 Predict Crime Rate"):
         st.write("• Invest in educational infrastructure and programs")
     if housing_vacant > 15:
         st.write("• Address vacant housing through urban renewal initiatives")
+
