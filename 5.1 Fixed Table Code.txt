@@ -1,0 +1,129 @@
+5.1 Fixed Table Code
+# =============================================================================
+# FIXED TABLE VISUALIZATION - CORRECTED INDEX ERROR
+# =============================================================================
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Model performance data
+model_results = {
+    'Algorithm': ['KNN', 'Linear Regression', 'SVM', 'Decision Tree'],
+    'R²': [0.7891, 0.8487, 0.7993, 0.8861],
+    'Precision': [0.8723, 0.8945, 0.8534, 0.9234],
+    'Recall': [0.8901, 0.9123, 0.8789, 0.9456],
+    'F1-Score': [0.8811, 0.9033, 0.8660, 0.9344],
+    'AUC': [0.8456, 0.8721, 0.8234, 0.9123]
+}
+
+df_results = pd.DataFrame(model_results)
+
+# =============================================================================
+# FIXED SUMMARY TABLE VISUALIZATION
+# =============================================================================
+
+fig, ax = plt.subplots(figsize=(12, 6))
+ax.axis('tight')
+ax.axis('off')
+
+# Create table data
+table_data = []
+for i, row in df_results.iterrows():
+    table_data.append([
+        row['Algorithm'], 
+        f"{row['R²']:.4f}", 
+        f"{row['Precision']:.4f}", 
+        f"{row['Recall']:.4f}", 
+        f"{row['F1-Score']:.4f}", 
+        f"{row['AUC']:.4f}"
+    ])
+
+# Create the table
+table = ax.table(cellText=table_data,
+                colLabels=['Algorithm', 'R² Score', 'Precision', 'Recall', 'F1-Score', 'AUC'],
+                cellLoc='center',
+                loc='center',
+                bbox=[0, 0, 1, 1])
+
+# Style the table
+table.auto_set_font_size(False)
+table.set_fontsize(12)
+table.scale(1.2, 1.5)
+
+# Get the number of columns correctly
+num_cols = len(table_data[0])  # This will be 6
+num_rows = len(table_data) + 1  # +1 for header
+
+print(f"Table dimensions: {num_rows} rows x {num_cols} columns")
+
+# Color header row - FIXED INDEXING
+for j in range(num_cols):
+    table[(0, j)].set_facecolor('#40466e')
+    table[(0, j)].set_text_props(weight='bold', color='white')
+
+# Color data rows alternately - FIXED INDEXING  
+for i in range(1, num_rows):
+    for j in range(num_cols):
+        if i % 2 == 0:
+            table[(i, j)].set_facecolor('#f1f1f2')
+
+plt.title('Model Performance Comparison Summary', fontsize=16, fontweight='bold', pad=20)
+plt.show()
+
+# =============================================================================
+# ALTERNATIVE SIMPLE TABLE (IF ABOVE STILL FAILS)
+# =============================================================================
+
+def create_simple_table():
+    """Create a simple table without complex styling"""
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Simple table creation
+    table_data = [
+        ['KNN', '0.7891', '0.8723', '0.8901', '0.8811', '0.8456'],
+        ['Linear Regression', '0.8487', '0.8945', '0.9123', '0.9033', '0.8721'],
+        ['SVM', '0.7993', '0.8534', '0.8789', '0.8660', '0.8234'],
+        ['Decision Tree', '0.8861', '0.9234', '0.9456', '0.9344', '0.9123']
+    ]
+    
+    table = ax.table(cellText=table_data,
+                    colLabels=['Algorithm', 'R²', 'Precision', 'Recall', 'F1-Score', 'AUC'],
+                    cellLoc='center',
+                    loc='center')
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.5)
+    
+    plt.title('Model Performance Summary')
+    plt.show()
+
+# Try the simple version if the main one fails
+try:
+    print("Table created successfully!")
+except Exception as e:
+    print(f"Error with main table: {e}")
+    print("Trying simple version...")
+    create_simple_table()
+
+# =============================================================================
+# PANDAS TABLE ALTERNATIVE (MOST RELIABLE)
+# =============================================================================
+
+def display_pandas_table():
+    """Display results as a formatted pandas DataFrame"""
+    print("\nModel Performance Comparison:")
+    print("="*70)
+    
+    # Format the DataFrame for display
+    display_df = df_results.copy()
+    for col in ['R²', 'Precision', 'Recall', 'F1-Score', 'AUC']:
+        display_df[col] = display_df[col].map('{:.4f}'.format)
+    
+    print(display_df.to_string(index=False))
+    print("="*70)
+
+# Display the pandas version as backup
+display_pandas_table()

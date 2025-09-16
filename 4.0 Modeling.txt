@@ -1,0 +1,1266 @@
+4.0 Modeling
+# =============================================================================
+# COMPLETE MODELING IMPLEMENTATION - COMMUNITIES AND CRIME DATASET
+# =============================================================================
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.metrics import (mean_absolute_error, mean_squared_error, r2_score, 
+                           confusion_matrix, classification_report, roc_curve, auc)
+from scipy import stats
+import warnings
+warnings.filterwarnings('ignore')
+
+print("Starting Complete Modeling Implementation...")
+print("=" * 80)
+
+# =============================================================================
+# STEP 1: DATA PREPARATION
+# =============================================================================
+
+print("\n1. DATA PREPARATION")
+print("-" * 40)
+
+# Load your cleaned dataset (replace with your actual data loading)
+# Assuming df_cleaned exists from your data preparation steps
+# If not, load your data here:
+# df_cleaned = pd.read_excel('data2.xlsx')  # or however you load your data
+
+# Prepare features and target
+try:
+    # Remove target variable and any non-predictive columns
+    non_predictive_cols = ['state', 'county', 'community', 'communityname', 'fold']
+    feature_cols = [col for col in df_cleaned.columns if col not in ['ViolentCrimesPerPop'] + non_predictive_cols]
+    
+    X = df_cleaned[feature_cols]
+    y = df_cleaned['ViolentCrimesPerPop']
+    
+    print(f"Dataset shape: {df_cleaned.shape}")
+    print(f"Features shape: {X.shape}")
+    print(f"Target shape: {y.shape}")
+    
+except NameError:
+    print("ERROR: df_cleaned not found. Please run your data preparation code first.")
+    print("Creating sample data for demonstration...")
+    
+    # Create sample data for demonstration (remove this in your actual code)
+    np.random.seed(42)
+    n_samples, n_features = 1000, 20
+    X = pd.DataFrame(np.random.randn(n_samples, n_features), 
+                     columns=[f'feature_{i}' for i in range(n_features)])
+    y = pd.Series(np.random.rand(n_samples), name='ViolentCrimesPerPop')
+    print("Using sample data for demonstration")
+
+# Handle missing values if any exist
+if X.isnull().sum().sum() > 0:
+    print(f"Warning: Found {X.isnull().sum().sum()} missing values. Filling with median...")
+    X = X.fillna(X.median())
+
+# Feature selection - select top 20 features to avoid overfitting
+print("\nFeature Selection:")
+selector = SelectKBest(score_func=f_regression, k=min(20, X.shape[1]))
+X_selected = selector.fit_transform(X, y)
+selected_features = X.columns[selector.get_support()]
+
+print(f"Selected {len(selected_features)} features from {X.shape[1]} total features")
+print(f"Selected features: {list(selected_features[:5])}..." if len(selected_features) > 5 else f"Selected features: {list(selected_features)}")
+
+# Split the data
+X_train, X_test, y_train, y_test = train_test_split(
+    X_selected, y, test_size=0.3, random_state=42, stratify=None
+)
+
+print(f"Training set: {X_train.shape[0]} samples")
+print(f"Test set: {X_test.shape[0]} samples")
+
+# Standardize features for algorithms that need it
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+print("Data preparation completed successfully!")
+
+# =============================================================================
+# STEP 2: MODEL TRAINING AND EVALUATION
+# =============================================================================
+
+print("\n" + "=" * 80)
+print("2. MODEL TRAINING AND EVALUATION")
+print("=" * 80)
+
+# Store all model results
+model_results = {}
+model_metrics = []
+
+# =============================================================================
+# 2.1 K-NEAREST NEIGHBORS (KNN)
+# =============================================================================
+
+print("\n2.1 K-NEAREST NEIGHBORS (KNN)")
+print("-" * 40)
+
+# KNN Parameter Grid
+knn_param_grid = {
+    'n_neighbors': [3, 5, 7, 9, 11],
+    'weights': ['uniform', 'distance'],
+    'metric': ['euclidean', 'manhattan'],
+    'p': [1, 2]
+}
+
+print("Training KNN with GridSearchCV...")
+knn_regressor = KNeighborsRegressor()
+knn_grid_search = GridSearchCV(
+    knn_regressor, knn_param_grid, cv=5, scoring='r2', n_jobs=-1, verbose=0
+)
+
+knn_grid_search.fit(X_train_scaled, y_train)
+best_knn = knn_grid_search.best_estimator_
+
+print(f"Best KNN Parameters: {knn_grid_search.best_params_}")
+print(f"Best CV Score: {knn_grid_search.best_score_:.4f}")
+
+# Generate predictions
+knn_predictions = best_knn.predict(X_test_scaled)
+
+# Calculate metrics
+knn_mae = mean_absolute_error(y_test, knn_predictions)
+knn_mse = mean_squared_error(y_test, knn_predictions)
+knn_rmse = np.sqrt(knn_mse)
+knn_r2 = r2_score(y_test, knn_predictions)
+knn_cv_scores = cross_val_score(best_knn, X_train_scaled, y_train, cv=5, scoring='r2')
+
+print(f"KNN Test Results:")
+print(f"  MAE: {knn_mae:.4f}")
+print(f"  MSE: {knn_mse:.4f}")
+print(f"  RMSE: {knn_rmse:.4f}")
+print(f"  R²: {knn_r2:.4f}")
+print(f"  CV R² Mean: {knn_cv_scores.mean():.4f} ± {knn_cv_scores.std():.4f}")
+
+# Store results
+model_results['KNN'] = (best_knn, knn_predictions)
+model_metrics.append({
+    'Model': 'KNN',
+    'MAE': knn_mae,
+    'MSE': knn_mse,
+    'RMSE': knn_rmse,
+    'R²': knn_r2,
+    'CV_R²_Mean': knn_cv_scores.mean(),
+    'CV_R²_Std': knn_cv_scores.std()
+})
+
+# =============================================================================
+# 2.2 LINEAR REGRESSION
+# =============================================================================
+
+print("\n2.2 LINEAR REGRESSION")
+print("-" * 40)
+
+# Test different regularization approaches
+models_to_test = {
+    'LinearRegression': (LinearRegression(), {'fit_intercept': [True, False]}),
+    'Ridge': (Ridge(), {'alpha': [0.001, 0.01, 0.1, 1.0, 10.0]}),
+    'Lasso': (Lasso(max_iter=2000), {'alpha': [0.001, 0.01, 0.1, 1.0, 10.0]})
+}
+
+best_lr_score = -np.inf
+best_lr_model = None
+best_lr_name = None
+
+print("Testing Linear Regression variants...")
+for name, (model, param_grid) in models_to_test.items():
+    grid_search = GridSearchCV(model, param_grid, cv=5, scoring='r2', n_jobs=-1, verbose=0)
+    grid_search.fit(X_train_scaled, y_train)
+    
+    if grid_search.best_score_ > best_lr_score:
+        best_lr_score = grid_search.best_score_
+        best_lr_model = grid_search.best_estimator_
+        best_lr_name = name
+
+print(f"Best Linear Model: {best_lr_name}")
+print(f"Best Parameters: {best_lr_model.get_params()}")
+print(f"Best CV Score: {best_lr_score:.4f}")
+
+# Generate predictions
+lr_predictions = best_lr_model.predict(X_test_scaled)
+
+# Calculate metrics
+lr_mae = mean_absolute_error(y_test, lr_predictions)
+lr_mse = mean_squared_error(y_test, lr_predictions)
+lr_rmse = np.sqrt(lr_mse)
+lr_r2 = r2_score(y_test, lr_predictions)
+lr_cv_scores = cross_val_score(best_lr_model, X_train_scaled, y_train, cv=5, scoring='r2')
+
+print(f"Linear Regression Test Results:")
+print(f"  MAE: {lr_mae:.4f}")
+print(f"  MSE: {lr_mse:.4f}")
+print(f"  RMSE: {lr_rmse:.4f}")
+print(f"  R²: {lr_r2:.4f}")
+print(f"  CV R² Mean: {lr_cv_scores.mean():.4f} ± {lr_cv_scores.std():.4f}")
+
+# Store results
+model_results['Linear Regression'] = (best_lr_model, lr_predictions)
+model_metrics.append({
+    'Model': 'Linear Regression',
+    'MAE': lr_mae,
+    'MSE': lr_mse,
+    'RMSE': lr_rmse,
+    'R²': lr_r2,
+    'CV_R²_Mean': lr_cv_scores.mean(),
+    'CV_R²_Std': lr_cv_scores.std()
+})
+
+# =============================================================================
+# 2.3 SUPPORT VECTOR MACHINE (SVM)
+# =============================================================================
+
+print("\n2.3 SUPPORT VECTOR MACHINE (SVM)")
+print("-" * 40)
+
+# SVM Parameter Grid - reduced for computational efficiency
+svm_param_grid = {
+    'C': [0.1, 1.0, 10.0],
+    'kernel': ['linear', 'rbf'],
+    'gamma': ['scale', 'auto', 0.01, 0.1],
+    'epsilon': [0.01, 0.1, 0.2]
+}
+
+print("Training SVM with GridSearchCV...")
+svm_regressor = SVR()
+svm_grid_search = GridSearchCV(
+    svm_regressor, svm_param_grid, cv=3, scoring='r2', n_jobs=-1, verbose=0
+)
+
+svm_grid_search.fit(X_train_scaled, y_train)
+best_svm = svm_grid_search.best_estimator_
+
+print(f"Best SVM Parameters: {svm_grid_search.best_params_}")
+print(f"Best CV Score: {svm_grid_search.best_score_:.4f}")
+
+# Generate predictions
+svm_predictions = best_svm.predict(X_test_scaled)
+
+# Calculate metrics
+svm_mae = mean_absolute_error(y_test, svm_predictions)
+svm_mse = mean_squared_error(y_test, svm_predictions)
+svm_rmse = np.sqrt(svm_mse)
+svm_r2 = r2_score(y_test, svm_predictions)
+svm_cv_scores = cross_val_score(best_svm, X_train_scaled, y_train, cv=5, scoring='r2')
+
+print(f"SVM Test Results:")
+print(f"  MAE: {svm_mae:.4f}")
+print(f"  MSE: {svm_mse:.4f}")
+print(f"  RMSE: {svm_rmse:.4f}")
+print(f"  R²: {svm_r2:.4f}")
+print(f"  CV R² Mean: {svm_cv_scores.mean():.4f} ± {svm_cv_scores.std():.4f}")
+
+# Store results
+model_results['SVM'] = (best_svm, svm_predictions)
+model_metrics.append({
+    'Model': 'SVM',
+    'MAE': svm_mae,
+    'MSE': svm_mse,
+    'RMSE': svm_rmse,
+    'R²': svm_r2,
+    'CV_R²_Mean': svm_cv_scores.mean(),
+    'CV_R²_Std': svm_cv_scores.std()
+})
+
+# =============================================================================
+# 2.4 DECISION TREE
+# =============================================================================
+
+print("\n2.4 DECISION TREE")
+print("-" * 40)
+
+# Decision Tree Parameter Grid
+dt_param_grid = {
+    'max_depth': [3, 5, 7, 10, 15, None],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 5],
+    'criterion': ['mse', 'friedman_mse'],
+    'max_features': ['auto', 'sqrt', None]
+}
+
+print("Training Decision Tree with GridSearchCV...")
+dt_regressor = DecisionTreeRegressor(random_state=42)
+dt_grid_search = GridSearchCV(
+    dt_regressor, dt_param_grid, cv=5, scoring='r2', n_jobs=-1, verbose=0
+)
+
+dt_grid_search.fit(X_train, y_train)  # No scaling needed for Decision Tree
+best_dt = dt_grid_search.best_estimator_
+
+print(f"Best Decision Tree Parameters: {dt_grid_search.best_params_}")
+print(f"Best CV Score: {dt_grid_search.best_score_:.4f}")
+
+# Generate predictions
+dt_predictions = best_dt.predict(X_test)
+
+# Calculate metrics
+dt_mae = mean_absolute_error(y_test, dt_predictions)
+dt_mse = mean_squared_error(y_test, dt_predictions)
+dt_rmse = np.sqrt(dt_mse)
+dt_r2 = r2_score(y_test, dt_predictions)
+dt_cv_scores = cross_val_score(best_dt, X_train, y_train, cv=5, scoring='r2')
+
+print(f"Decision Tree Test Results:")
+print(f"  MAE: {dt_mae:.4f}")
+print(f"  MSE: {dt_mse:.4f}")
+print(f"  RMSE: {dt_rmse:.4f}")
+print(f"  R²: {dt_r2:.4f}")
+print(f"  CV R² Mean: {dt_cv_scores.mean():.4f} ± {dt_cv_scores.std():.4f}")
+
+# Store results
+model_results['Decision Tree'] = (best_dt, dt_predictions)
+model_metrics.append({
+    'Model': 'Decision Tree',
+    'MAE': dt_mae,
+    'MSE': dt_mse,
+    'RMSE': dt_rmse,
+    'R²': dt_r2,
+    'CV_R²_Mean': dt_cv_scores.mean(),
+    'CV_R²_Std': dt_cv_scores.std()
+})
+
+# =============================================================================
+# STEP 3: MODEL COMPARISON SUMMARY
+# =============================================================================
+
+print("\n" + "=" * 80)
+print("3. MODEL COMPARISON SUMMARY")
+print("=" * 80)
+
+# Create comparison DataFrame
+comparison_df = pd.DataFrame(model_metrics)
+print("\nDetailed Model Comparison:")
+print(comparison_df.round(4))
+
+# Find best models
+best_r2_model = comparison_df.loc[comparison_df['R²'].idxmax(), 'Model']
+best_mae_model = comparison_df.loc[comparison_df['MAE'].idxmin(), 'Model']
+
+print(f"\nBest R² Score: {best_r2_model} ({comparison_df['R²'].max():.4f})")
+print(f"Best MAE (lowest): {best_mae_model} ({comparison_df['MAE'].min():.4f})")
+
+# Visualization of results
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+# R² comparison
+axes[0,0].bar(comparison_df['Model'], comparison_df['R²'])
+axes[0,0].set_title('R² Score Comparison')
+axes[0,0].set_ylabel('R² Score')
+axes[0,0].tick_params(axis='x', rotation=45)
+
+# RMSE comparison
+axes[0,1].bar(comparison_df['Model'], comparison_df['RMSE'])
+axes[0,1].set_title('RMSE Comparison')
+axes[0,1].set_ylabel('RMSE')
+axes[0,1].tick_params(axis='x', rotation=45)
+
+# MAE comparison
+axes[1,0].bar(comparison_df['Model'], comparison_df['MAE'])
+axes[1,0].set_title('MAE Comparison')
+axes[1,0].set_ylabel('MAE')
+axes[1,0].tick_params(axis='x', rotation=45)
+
+# Cross-validation scores
+axes[1,1].bar(comparison_df['Model'], comparison_df['CV_R²_Mean'])
+axes[1,1].errorbar(range(len(comparison_df)), comparison_df['CV_R²_Mean'], 
+                   yerr=comparison_df['CV_R²_Std'], fmt='none', color='red', capsize=5)
+axes[1,1].set_title('Cross-Validation R² Mean ± Std')
+axes[1,1].set_ylabel('CV R² Mean')
+axes[1,1].tick_params(axis='x', rotation=45)
+
+plt.tight_layout()
+plt.show()
+
+print("\nModel training completed successfully!")
+print("All models are now available in the 'model_results' dictionary")
+print("You can now run the comprehensive evaluation code.")
+
+# =============================================================================
+# READY FOR COMPREHENSIVE EVALUATION
+# =============================================================================
+
+print("\n" + "=" * 80)
+print("READY FOR COMPREHENSIVE EVALUATION")
+print("=" * 80)
+print("\nYou can now run:")
+print("comprehensive_model_evaluation(model_results, X_test, y_test, selected_features)")
+print("\nAvailable models:")
+for model_name in model_results.keys():
+    print(f"  - {model_name}")
+
+# Verify all required variables exist
+required_vars = ['model_results', 'X_test', 'y_test', 'selected_features', 
+                'best_knn', 'best_lr_model', 'best_svm', 'best_dt',
+                'knn_predictions', 'lr_predictions', 'svm_predictions', 'dt_predictions']
+
+print(f"\nAll required variables available: {all(var in locals() for var in required_vars)}")
+
+
+
+# =============================================================================
+# ALGORITHM VISUALIZATION CODE FOR ALL 4 MODELS
+# =============================================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle, Rectangle
+import seaborn as sns
+from sklearn.datasets import make_regression
+from sklearn.tree import plot_tree
+import matplotlib.patches as patches
+
+# Set style
+plt.style.use('default')
+sns.set_palette("Set2")
+
+# =============================================================================
+# 1. K-NEAREST NEIGHBORS VISUALIZATION
+# =============================================================================
+
+def plot_knn_visualization():
+    """
+    Visualize KNN algorithm concept with sample data points
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # Generate sample 2D data for visualization
+    np.random.seed(42)
+    
+    # Class 1: Low Crime (Green)
+    class1_x = np.random.normal(2, 0.8, 20)
+    class1_y = np.random.normal(2, 0.8, 20)
+    
+    # Class 2: Medium Crime (Orange) 
+    class2_x = np.random.normal(5, 0.8, 20)
+    class2_y = np.random.normal(5, 0.8, 20)
+    
+    # Class 3: High Crime (Red)
+    class3_x = np.random.normal(8, 0.8, 20)
+    class3_y = np.random.normal(3, 0.8, 20)
+    
+    # New point to classify
+    new_point = [5.5, 4.2]
+    
+    # Plot 1: Original data points
+    axes[0].scatter(class1_x, class1_y, c='green', s=100, alpha=0.7, label='Low Crime', marker='o')
+    axes[0].scatter(class2_x, class2_y, c='orange', s=100, alpha=0.7, label='Medium Crime', marker='s')
+    axes[0].scatter(class3_x, class3_y, c='red', s=100, alpha=0.7, label='High Crime', marker='^')
+    axes[0].scatter(new_point[0], new_point[1], c='black', s=200, marker='*', label='New Point')
+    axes[0].set_title('Training Data Points\n(Communities by Crime Level)')
+    axes[0].set_xlabel('Socioeconomic Factor 1')
+    axes[0].set_ylabel('Socioeconomic Factor 2')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # Plot 2: KNN with k=3
+    axes[1].scatter(class1_x, class1_y, c='green', s=100, alpha=0.7, label='Low Crime', marker='o')
+    axes[1].scatter(class2_x, class2_y, c='orange', s=100, alpha=0.7, label='Medium Crime', marker='s')
+    axes[1].scatter(class3_x, class3_y, c='red', s=100, alpha=0.7, label='High Crime', marker='^')
+    axes[1].scatter(new_point[0], new_point[1], c='black', s=200, marker='*', label='New Point')
+    
+    # Draw circle for k=3 nearest neighbors
+    circle = Circle(new_point, 1.5, fill=False, color='blue', linewidth=3, linestyle='--')
+    axes[1].add_patch(circle)
+    
+    # Highlight nearest neighbors
+    all_points = [(class1_x[i], class1_y[i], 'green') for i in range(len(class1_x))] + \
+                 [(class2_x[i], class2_y[i], 'orange') for i in range(len(class2_x))] + \
+                 [(class3_x[i], class3_y[i], 'red') for i in range(len(class3_x))]
+    
+    distances = [np.sqrt((p[0] - new_point[0])**2 + (p[1] - new_point[1])**2) for p in all_points]
+    nearest_3 = sorted(zip(distances, all_points))[:3]
+    
+    for dist, (x, y, color) in nearest_3:
+        circle_highlight = Circle((x, y), 0.2, fill=True, color='yellow', alpha=0.8)
+        axes[1].add_patch(circle_highlight)
+        axes[1].plot([new_point[0], x], [new_point[1], y], 'b--', alpha=0.6)
+    
+    axes[1].set_title('K-NN Algorithm (k=3)\nFinding 3 Nearest Neighbors')
+    axes[1].set_xlabel('Socioeconomic Factor 1')
+    axes[1].set_ylabel('Socioeconomic Factor 2')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    # Plot 3: Decision regions
+    x_min, x_max = 0, 10
+    y_min, y_max = 0, 8
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+    
+    # Simplified decision regions for visualization
+    Z = np.zeros_like(xx)
+    for i in range(xx.shape[0]):
+        for j in range(xx.shape[1]):
+            point = [xx[i,j], yy[i,j]]
+            distances = [np.sqrt((p[0] - point[0])**2 + (p[1] - point[1])**2) for p in all_points]
+            nearest_k = sorted(zip(distances, all_points))[:3]
+            
+            # Vote based on nearest neighbors
+            votes = {'green': 0, 'orange': 0, 'red': 0}
+            for dist, (x, y, color) in nearest_k:
+                votes[color] += 1
+            
+            winner = max(votes, key=votes.get)
+            if winner == 'green':
+                Z[i,j] = 0
+            elif winner == 'orange':
+                Z[i,j] = 1
+            else:
+                Z[i,j] = 2
+    
+    axes[2].contourf(xx, yy, Z, levels=2, alpha=0.3, colors=['lightgreen', 'orange', 'lightcoral'])
+    axes[2].scatter(class1_x, class1_y, c='green', s=100, alpha=0.9, label='Low Crime', marker='o')
+    axes[2].scatter(class2_x, class2_y, c='orange', s=100, alpha=0.9, label='Medium Crime', marker='s')
+    axes[2].scatter(class3_x, class3_y, c='red', s=100, alpha=0.9, label='High Crime', marker='^')
+    axes[2].scatter(new_point[0], new_point[1], c='black', s=200, marker='*', label='New Point')
+    axes[2].set_title('K-NN Decision Regions\n(Crime Level Predictions)')
+    axes[2].set_xlabel('Socioeconomic Factor 1')
+    axes[2].set_ylabel('Socioeconomic Factor 2')
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# 2. LINEAR REGRESSION VISUALIZATION
+# =============================================================================
+
+def plot_linear_regression_visualization():
+    """
+    Visualize Linear Regression concept with crime data relationship
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Generate sample data
+    np.random.seed(42)
+    x = np.linspace(0, 10, 50)
+    y_true = 0.6 * x + 2 + np.random.normal(0, 0.8, 50)
+    
+    # Plot 1: Scatter plot with best fit line
+    axes[0,0].scatter(x, y_true, alpha=0.6, s=60, label='Community Data')
+    
+    # Calculate best fit line
+    coeffs = np.polyfit(x, y_true, 1)
+    y_pred = coeffs[0] * x + coeffs[1]
+    axes[0,0].plot(x, y_pred, 'r-', linewidth=2, label=f'Best Fit Line\ny = {coeffs[0]:.2f}x + {coeffs[1]:.2f}')
+    
+    axes[0,0].set_title('Linear Regression\nCrime Rate vs Poverty Level')
+    axes[0,0].set_xlabel('Poverty Level (Normalized)')
+    axes[0,0].set_ylabel('Violent Crime Rate (Normalized)')
+    axes[0,0].legend()
+    axes[0,0].grid(True, alpha=0.3)
+    
+    # Plot 2: Residuals
+    residuals = y_true - y_pred
+    axes[0,1].scatter(y_pred, residuals, alpha=0.6, s=60)
+    axes[0,1].axhline(y=0, color='r', linestyle='--', linewidth=2)
+    axes[0,1].set_title('Residuals Plot\nActual - Predicted Values')
+    axes[0,1].set_xlabel('Predicted Crime Rate')
+    axes[0,1].set_ylabel('Residuals')
+    axes[0,1].grid(True, alpha=0.3)
+    
+    # Plot 3: Multiple Linear Regression concept (3D visualization in 2D)
+    x1 = np.random.uniform(0, 10, 30)
+    x2 = np.random.uniform(0, 10, 30)
+    y_multi = 0.4 * x1 + 0.3 * x2 + 1 + np.random.normal(0, 0.5, 30)
+    
+    scatter = axes[1,0].scatter(x1, x2, c=y_multi, cmap='viridis', s=100, alpha=0.8)
+    axes[1,0].set_title('Multiple Linear Regression\nCrime Rate vs Multiple Factors')
+    axes[1,0].set_xlabel('Poverty Level')
+    axes[1,0].set_ylabel('Unemployment Rate')
+    cbar = plt.colorbar(scatter, ax=axes[1,0])
+    cbar.set_label('Crime Rate')
+    axes[1,0].grid(True, alpha=0.3)
+    
+    # Plot 4: Regularization comparison
+    # Generate data with some noise
+    x_reg = np.linspace(0, 10, 20)
+    y_reg = 2 * x_reg + np.random.normal(0, 2, 20)
+    
+    # Fit different models
+    from sklearn.linear_model import LinearRegression, Ridge, Lasso
+    from sklearn.preprocessing import PolynomialFeatures
+    
+    # Add polynomial features for overfitting demonstration
+    poly_features = PolynomialFeatures(degree=8)
+    x_reg_poly = poly_features.fit_transform(x_reg.reshape(-1, 1))
+    
+    # Fit models
+    lr = LinearRegression().fit(x_reg_poly, y_reg)
+    ridge = Ridge(alpha=1.0).fit(x_reg_poly, y_reg)
+    lasso = Lasso(alpha=0.1).fit(x_reg_poly, y_reg)
+    
+    # Predict
+    x_plot = np.linspace(0, 10, 100)
+    x_plot_poly = poly_features.transform(x_plot.reshape(-1, 1))
+    
+    y_lr = lr.predict(x_plot_poly)
+    y_ridge = ridge.predict(x_plot_poly)
+    y_lasso = lasso.predict(x_plot_poly)
+    
+    axes[1,1].scatter(x_reg, y_reg, alpha=0.6, s=60, label='Training Data')
+    axes[1,1].plot(x_plot, y_lr, 'r-', linewidth=2, label='Linear Regression', alpha=0.8)
+    axes[1,1].plot(x_plot, y_ridge, 'g-', linewidth=2, label='Ridge Regression', alpha=0.8)
+    axes[1,1].plot(x_plot, y_lasso, 'b-', linewidth=2, label='Lasso Regression', alpha=0.8)
+    axes[1,1].set_title('Regularization Comparison\nOverfitting vs Regularized Models')
+    axes[1,1].set_xlabel('Feature Value')
+    axes[1,1].set_ylabel('Target Value')
+    axes[1,1].legend()
+    axes[1,1].grid(True, alpha=0.3)
+    axes[1,1].set_ylim(-5, 25)
+    
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# 3. SUPPORT VECTOR MACHINE VISUALIZATION
+# =============================================================================
+
+def plot_svm_visualization():
+    """
+    Visualize SVM algorithm concepts
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Generate sample data for SVM classification
+    np.random.seed(42)
+    
+    # Class 1 (Low Crime)
+    class1_x = np.random.normal(2, 0.5, 15)
+    class1_y = np.random.normal(2, 0.5, 15)
+    
+    # Class 2 (High Crime)
+    class2_x = np.random.normal(5, 0.5, 15)
+    class2_y = np.random.normal(5, 0.5, 15)
+    
+    # Plot 1: Linear SVM
+    axes[0,0].scatter(class1_x, class1_y, c='blue', s=100, alpha=0.7, label='Low Crime', marker='o')
+    axes[0,0].scatter(class2_x, class2_y, c='red', s=100, alpha=0.7, label='High Crime', marker='s')
+    
+    # Draw decision boundary (simplified)
+    x_line = np.linspace(1, 6, 100)
+    y_line = x_line  # 45-degree line for visualization
+    
+    axes[0,0].plot(x_line, y_line, 'k-', linewidth=2, label='Decision Boundary')
+    
+    # Draw support vectors (closest points to boundary)
+    support_vectors = [(3, 2.8), (4, 4.2)]
+    for sv in support_vectors:
+        circle = Circle(sv, 0.15, fill=False, color='yellow', linewidth=3)
+        axes[0,0].add_patch(circle)
+    
+    # Draw margins
+    axes[0,0].plot(x_line, y_line + 0.5, 'k--', alpha=0.6, label='Margins')
+    axes[0,0].plot(x_line, y_line - 0.5, 'k--', alpha=0.6)
+    
+    axes[0,0].set_title('Linear SVM\nMaximum Margin Classifier')
+    axes[0,0].set_xlabel('Socioeconomic Factor 1')
+    axes[0,0].set_ylabel('Socioeconomic Factor 2')
+    axes[0,0].legend()
+    axes[0,0].grid(True, alpha=0.3)
+    
+    # Plot 2: Non-linear SVM with RBF kernel
+    # Generate circular data
+    theta1 = np.linspace(0, 2*np.pi, 20)
+    r1 = 1 + 0.2 * np.random.randn(20)
+    x1_circle = r1 * np.cos(theta1) + 3
+    y1_circle = r1 * np.sin(theta1) + 3
+    
+    theta2 = np.linspace(0, 2*np.pi, 20)
+    r2 = 2 + 0.3 * np.random.randn(20)
+    x2_circle = r2 * np.cos(theta2) + 3
+    y2_circle = r2 * np.sin(theta2) + 3
+    
+    axes[0,1].scatter(x1_circle, y1_circle, c='blue', s=100, alpha=0.7, label='Low Crime', marker='o')
+    axes[0,1].scatter(x2_circle, y2_circle, c='red', s=100, alpha=0.7, label='High Crime', marker='s')
+    
+    # Draw circular decision boundary
+    circle_boundary = Circle((3, 3), 1.5, fill=False, color='black', linewidth=2)
+    axes[0,1].add_patch(circle_boundary)
+    
+    axes[0,1].set_title('RBF Kernel SVM\nNon-linear Decision Boundary')
+    axes[0,1].set_xlabel('Socioeconomic Factor 1')
+    axes[0,1].set_ylabel('Socioeconomic Factor 2')
+    axes[0,1].legend()
+    axes[0,1].grid(True, alpha=0.3)
+    axes[0,1].set_xlim(0, 6)
+    axes[0,1].set_ylim(0, 6)
+    
+    # Plot 3: Different kernels comparison
+    x_demo = np.linspace(-2, 2, 100)
+    
+    # Linear kernel
+    y_linear = x_demo
+    
+    # Polynomial kernel (degree 2)
+    y_poly = x_demo ** 2
+    
+    # RBF kernel
+    y_rbf = np.exp(-x_demo**2)
+    
+    axes[1,0].plot(x_demo, y_linear, 'b-', linewidth=2, label='Linear Kernel')
+    axes[1,0].plot(x_demo, y_poly, 'r-', linewidth=2, label='Polynomial Kernel (deg=2)')
+    axes[1,0].plot(x_demo, y_rbf, 'g-', linewidth=2, label='RBF Kernel')
+    axes[1,0].set_title('SVM Kernel Functions\nDifferent Transformation Methods')
+    axes[1,0].set_xlabel('Input Feature')
+    axes[1,0].set_ylabel('Transformed Feature')
+    axes[1,0].legend()
+    axes[1,0].grid(True, alpha=0.3)
+    
+    # Plot 4: Hyperplane concept in 3D (shown as 2D projection)
+    # Create mesh for hyperplane visualization
+    x_hp = np.linspace(0, 10, 20)
+    y_hp = np.linspace(0, 10, 20)
+    X_hp, Y_hp = np.meshgrid(x_hp, y_hp)
+    Z_hp = 0.5 * X_hp + 0.3 * Y_hp + 2  # Crime rate = 0.5*poverty + 0.3*unemployment + 2
+    
+    contour = axes[1,1].contour(X_hp, Y_hp, Z_hp, levels=10, alpha=0.6)
+    axes[1,1].clabel(contour, inline=True, fontsize=8)
+    
+    # Add some sample points
+    sample_x = [2, 4, 6, 8, 3, 7, 5]
+    sample_y = [3, 5, 2, 6, 7, 3, 8]
+    sample_z = [0.5*x + 0.3*y + 2 + np.random.normal(0, 0.5) for x, y in zip(sample_x, sample_y)]
+    
+    scatter = axes[1,1].scatter(sample_x, sample_y, c=sample_z, s=100, cmap='viridis', alpha=0.8)
+    
+    axes[1,1].set_title('SVM Hyperplane Concept\nSeparating Communities in Feature Space')
+    axes[1,1].set_xlabel('Poverty Level')
+    axes[1,1].set_ylabel('Unemployment Rate')
+    cbar = plt.colorbar(scatter, ax=axes[1,1])
+    cbar.set_label('Predicted Crime Level')
+    axes[1,1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# 4. DECISION TREE VISUALIZATION
+# =============================================================================
+
+def plot_decision_tree_visualization():
+    """
+    Visualize Decision Tree algorithm concepts
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Generate sample data
+    np.random.seed(42)
+    
+    # Plot 1: Decision tree structure diagram
+    axes[0,0].set_xlim(0, 10)
+    axes[0,0].set_ylim(0, 8)
+    
+    # Root node
+    root = Rectangle((4, 6.5), 2, 1, facecolor='lightblue', edgecolor='black')
+    axes[0,0].add_patch(root)
+    axes[0,0].text(5, 7, 'Poverty Level\n≤ 0.5?', ha='center', va='center', fontsize=10, fontweight='bold')
+    
+    # Left branch (Yes)
+    left_node = Rectangle((1, 4.5), 2, 1, facecolor='lightgreen', edgecolor='black')
+    axes[0,0].add_patch(left_node)
+    axes[0,0].text(2, 5, 'Unemployment\n≤ 0.3?', ha='center', va='center', fontsize=9)
+    
+    # Right branch (No)
+    right_node = Rectangle((7, 4.5), 2, 1, facecolor='lightcoral', edgecolor='black')
+    axes[0,0].add_patch(right_node)
+    axes[0,0].text(8, 5, 'Education\n≤ 0.6?', ha='center', va='center', fontsize=9)
+    
+    # Leaf nodes
+    leaf1 = Rectangle((0, 2.5), 1.5, 0.8, facecolor='lightgreen', edgecolor='black')
+    axes[0,0].add_patch(leaf1)
+    axes[0,0].text(0.75, 2.9, 'Low\nCrime', ha='center', va='center', fontsize=8)
+    
+    leaf2 = Rectangle((2.5, 2.5), 1.5, 0.8, facecolor='orange', edgecolor='black')
+    axes[0,0].add_patch(leaf2)
+    axes[0,0].text(3.25, 2.9, 'Medium\nCrime', ha='center', va='center', fontsize=8)
+    
+    leaf3 = Rectangle((6.5, 2.5), 1.5, 0.8, facecolor='orange', edgecolor='black')
+    axes[0,0].add_patch(leaf3)
+    axes[0,0].text(7.25, 2.9, 'Medium\nCrime', ha='center', va='center', fontsize=8)
+    
+    leaf4 = Rectangle((8.5, 2.5), 1.5, 0.8, facecolor='red', edgecolor='black')
+    axes[0,0].add_patch(leaf4)
+    axes[0,0].text(9.25, 2.9, 'High\nCrime', ha='center', va='center', fontsize=8)
+    
+    # Draw connections
+    axes[0,0].plot([4.5, 2], [6.5, 5.5], 'k-', linewidth=2)  # Root to left
+    axes[0,0].plot([5.5, 8], [6.5, 5.5], 'k-', linewidth=2)  # Root to right
+    axes[0,0].plot([1.5, 0.75], [4.5, 3.3], 'k-', linewidth=2)  # Left to leaf1
+    axes[0,0].plot([2.5, 3.25], [4.5, 3.3], 'k-', linewidth=2)  # Left to leaf2
+    axes[0,0].plot([7.5, 7.25], [4.5, 3.3], 'k-', linewidth=2)  # Right to leaf3
+    axes[0,0].plot([8.5, 9.25], [4.5, 3.3], 'k-', linewidth=2)  # Right to leaf4
+    
+    # Add labels
+    axes[0,0].text(3.2, 6, 'Yes', ha='center', va='center', fontsize=8, color='green')
+    axes[0,0].text(6.8, 6, 'No', ha='center', va='center', fontsize=8, color='red')
+    axes[0,0].text(1, 4, 'Yes', ha='center', va='center', fontsize=8, color='green')
+    axes[0,0].text(3.5, 4, 'No', ha='center', va='center', fontsize=8, color='red')
+    axes[0,0].text(6.8, 4, 'Yes', ha='center', va='center', fontsize=8, color='green')
+    axes[0,0].text(9, 4, 'No', ha='center', va='center', fontsize=8, color='red')
+    
+    axes[0,0].set_title('Decision Tree Structure\nCrime Prediction Logic')
+    axes[0,0].set_xticks([])
+    axes[0,0].set_yticks([])
+    axes[0,0].set_aspect('equal')
+    
+    # Plot 2: Decision boundaries in 2D space
+    x1 = np.linspace(0, 1, 100)
+    x2 = np.linspace(0, 1, 100)
+    X1, X2 = np.meshgrid(x1, x2)
+    
+    # Define decision regions based on tree structure
+    Z = np.zeros_like(X1)
+    for i in range(X1.shape[0]):
+        for j in range(X1.shape[1]):
+            poverty = X1[i, j]
+            unemployment = X2[i, j]
+            
+            if poverty <= 0.5:
+                if unemployment <= 0.3:
+                    Z[i, j] = 0  # Low crime
+                else:
+                    Z[i, j] = 1  # Medium crime
+            else:
+                if unemployment <= 0.6:  # Using unemployment as proxy for education
+                    Z[i, j] = 1  # Medium crime
+                else:
+                    Z[i, j] = 2  # High crime
+    
+    axes[0,1].contourf(X1, X2, Z, levels=2, alpha=0.6, colors=['lightgreen', 'orange', 'lightcoral'])
+    axes[0,1].contour(X1, X2, Z, levels=2, colors=['green', 'red'], linewidths=2)
+    
+    # Add decision boundary lines
+    axes[0,1].axvline(x=0.5, color='black', linewidth=2, linestyle='--', label='Poverty = 0.5')
+    axes[0,1].axhline(y=0.3, color='blue', linewidth=2, linestyle='--', label='Unemployment = 0.3')
+    axes[0,1].axhline(y=0.6, color='purple', linewidth=2, linestyle='--', label='Education threshold')
+    
+    # Add sample data points
+    sample_points = [(0.2, 0.2, 'Low'), (0.3, 0.4, 'Medium'), (0.7, 0.4, 'Medium'), (0.8, 0.8, 'High')]
+    colors = {'Low': 'green', 'Medium': 'orange', 'High': 'red'}
+    for x, y, label in sample_points:
+        axes[0,1].scatter(x, y, c=colors[label], s=150, edgecolors='black', linewidth=2)
+    
+    axes[0,1].set_title('Decision Tree Decision Regions\nCrime Level Predictions')
+    axes[0,1].set_xlabel('Poverty Level (Normalized)')
+    axes[0,1].set_ylabel('Unemployment Rate (Normalized)')
+    axes[0,1].legend()
+    axes[0,1].grid(True, alpha=0.3)
+    
+    # Plot 3: Feature importance visualization
+    features = ['Poverty Rate', 'Unemployment', 'Education Level', 'Family Structure', 'Housing Quality']
+    importance = [0.35, 0.25, 0.20, 0.15, 0.05]
+    
+    bars = axes[1,0].barh(features, importance, color=['darkred', 'red', 'orange', 'yellow', 'lightgreen'])
+    axes[1,0].set_title('Decision Tree Feature Importance\nMost Influential Crime Predictors')
+    axes[1,0].set_xlabel('Importance Score')
+    
+    # Add value labels
+    for i, bar in enumerate(bars):
+        width = bar.get_width()
+        axes[1,0].text(width + 0.01, bar.get_y() + bar.get_height()/2, 
+                      f'{importance[i]:.2f}', ha='left', va='center', fontweight='bold')
+    
+    axes[1,0].grid(True, alpha=0.3, axis='x')
+    
+    # Plot 4: Overfitting demonstration
+    # Generate noisy data
+    x_over = np.linspace(0, 10, 30)
+    y_over = 2 * np.sin(x_over) + np.random.normal(0, 0.5, 30)
+    
+    # Simple decision tree (underfitted)
+    x_simple = np.linspace(0, 10, 100)
+    y_simple = np.where(x_simple < 5, np.mean(y_over[x_over < 5]), np.mean(y_over[x_over >= 5]))
+    
+    # Complex decision tree (overfitted) - step function
+    y_complex = np.zeros_like(x_simple)
+    for i in range(len(x_simple)):
+        # Find nearest training point
+        nearest_idx = np.argmin(np.abs(x_over - x_simple[i]))
+        y_complex[i] = y_over[nearest_idx]
+    
+    # Optimal tree
+    y_optimal = 2 * np.sin(x_simple) + 0.1 * np.random.normal(0, 0.1, len(x_simple))
+    
+    axes[1,1].scatter(x_over, y_over, alpha=0.6, s=60, label='Training Data', color='black')
+    axes[1,1].plot(x_simple, y_simple, 'r-', linewidth=3, label='Underfitted (Too Simple)', alpha=0.8)
+    axes[1,1].plot(x_simple, y_complex, 'g-', linewidth=2, label='Overfitted (Too Complex)', alpha=0.7)
+    axes[1,1].plot(x_simple, y_optimal, 'b-', linewidth=2, label='Well-fitted (Optimal)', alpha=0.8)
+    
+    axes[1,1].set_title('Decision Tree Complexity\nUnderfitting vs Overfitting')
+    axes[1,1].set_xlabel('Feature Value')
+    axes[1,1].set_ylabel('Predicted Crime Rate')
+    axes[1,1].legend()
+    axes[1,1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# MAIN EXECUTION FUNCTION
+# =============================================================================
+
+def visualize_all_algorithms():
+    """
+    Execute all algorithm visualizations
+    """
+    print("Generating Algorithm Visualizations...")
+    print("=" * 60)
+    
+    print("\n1. K-Nearest Neighbors Visualization")
+    print("-" * 40)
+    plot_knn_visualization()
+    
+    print("\n2. Linear Regression Visualization")
+    print("-" * 40)
+    plot_linear_regression_visualization()
+    
+    print("\n3. Support Vector Machine Visualization")
+    print("-" * 40)
+    plot_svm_visualization()
+    
+    print("\n4. Decision Tree Visualization")
+    print("-" * 40)
+    plot_decision_tree_visualization()
+    
+    print("\nAll algorithm visualizations completed!")
+    print("These visualizations demonstrate the core concepts behind each algorithm.")
+
+# =============================================================================
+# SIMPLE 2D COMPARISON VISUALIZATION
+# =============================================================================
+
+def plot_algorithm_comparison():
+    """
+    Create a simple 2D comparison of all algorithms on the same dataset
+    """
+    # Generate sample 2D dataset for comparison
+    np.random.seed(42)
+    
+    # Create three distinct clusters representing crime levels
+    n_samples = 50
+    
+    # Low crime communities (bottom-left)
+    low_crime_x = np.random.normal(2, 0.8, n_samples)
+    low_crime_y = np.random.normal(2, 0.8, n_samples)
+    low_crime_labels = np.zeros(n_samples)
+    
+    # Medium crime communities (middle)
+    med_crime_x = np.random.normal(5, 0.8, n_samples)
+    med_crime_y = np.random.normal(5, 0.8, n_samples)
+    med_crime_labels = np.ones(n_samples)
+    
+    # High crime communities (top-right)
+    high_crime_x = np.random.normal(8, 0.8, n_samples)
+    high_crime_y = np.random.normal(8, 0.8, n_samples)
+    high_crime_labels = np.ones(n_samples) * 2
+    
+    # Combine all data
+    X_all = np.vstack([
+        np.column_stack([low_crime_x, low_crime_y]),
+        np.column_stack([med_crime_x, med_crime_y]),
+        np.column_stack([high_crime_x, high_crime_y])
+    ])
+    y_all = np.hstack([low_crime_labels, med_crime_labels, high_crime_labels])
+    
+    # Create visualization
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Define colors for each crime level
+    colors = ['green', 'orange', 'red']
+    labels = ['Low Crime', 'Medium Crime', 'High Crime']
+    
+    # Plot 1: KNN Decision Regions
+    axes[0,0].scatter(X_all[:, 0], X_all[:, 1], c=[colors[int(label)] for label in y_all], 
+                     s=60, alpha=0.7, edgecolors='black')
+    
+    # Create grid for decision regions
+    x_min, x_max = X_all[:, 0].min() - 1, X_all[:, 0].max() + 1
+    y_min, y_max = X_all[:, 1].min() - 1, X_all[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+    
+    # Simplified KNN decision regions (Voronoi-like)
+    mesh_points = np.c_[xx.ravel(), yy.ravel()]
+    Z_knn = np.zeros(len(mesh_points))
+    
+    for i, point in enumerate(mesh_points):
+        # Find distances to all training points
+        distances = [np.sqrt((point[0] - x)**2 + (point[1] - y)**2) for x, y in X_all]
+        # Get k=5 nearest neighbors
+        k_nearest_indices = np.argsort(distances)[:5]
+        k_nearest_labels = y_all[k_nearest_indices]
+        # Vote
+        Z_knn[i] = np.bincount(k_nearest_labels.astype(int)).argmax()
+    
+    Z_knn = Z_knn.reshape(xx.shape)
+    axes[0,0].contourf(xx, yy, Z_knn, levels=2, alpha=0.3, colors=['lightgreen', 'orange', 'lightcoral'])
+    axes[0,0].set_title('K-NN (k=5) Decision Regions\nNearest Neighbor Classification')
+    axes[0,0].set_xlabel('Socioeconomic Factor 1')
+    axes[0,0].set_ylabel('Socioeconomic Factor 2')
+    axes[0,0].grid(True, alpha=0.3)
+    
+    # Plot 2: Linear SVM
+    axes[0,1].scatter(X_all[:, 0], X_all[:, 1], c=[colors[int(label)] for label in y_all], 
+                     s=60, alpha=0.7, edgecolors='black')
+    
+    # Draw linear decision boundaries (simplified)
+    x_line1 = np.linspace(x_min, x_max, 100)
+    y_line1 = 0.5 * x_line1 + 1  # Separates low from others
+    y_line2 = 0.8 * x_line1 - 1  # Separates medium from high
+    
+    axes[0,1].plot(x_line1, y_line1, 'k-', linewidth=2, label='Decision Boundary 1')
+    axes[0,1].plot(x_line1, y_line2, 'k--', linewidth=2, label='Decision Boundary 2')
+    axes[0,1].set_title('Linear SVM Decision Boundaries\nMaximum Margin Classification')
+    axes[0,1].set_xlabel('Socioeconomic Factor 1')
+    axes[0,1].set_ylabel('Socioeconomic Factor 2')
+    axes[0,1].legend()
+    axes[0,1].grid(True, alpha=0.3)
+    axes[0,1].set_xlim(x_min, x_max)
+    axes[0,1].set_ylim(y_min, y_max)
+    
+    # Plot 3: Decision Tree Regions
+    axes[1,0].scatter(X_all[:, 0], X_all[:, 1], c=[colors[int(label)] for label in y_all], 
+                     s=60, alpha=0.7, edgecolors='black')
+    
+    # Draw rectangular decision regions (typical of decision trees)
+    # Vertical splits
+    axes[1,0].axvline(x=4, color='black', linewidth=2, linestyle='-', alpha=0.8)
+    axes[1,0].axvline(x=7, color='black', linewidth=2, linestyle='-', alpha=0.8)
+    # Horizontal splits
+    axes[1,0].axhline(y=4, color='black', linewidth=2, linestyle='-', alpha=0.8)
+    axes[1,0].axhline(y=7, color='black', linewidth=2, linestyle='-', alpha=0.8)
+    
+    # Add region labels
+    axes[1,0].text(2, 2, 'Low\nCrime', ha='center', va='center', fontsize=12, 
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
+    axes[1,0].text(5.5, 5.5, 'Medium\nCrime', ha='center', va='center', fontsize=12,
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="orange", alpha=0.8))
+    axes[1,0].text(8.5, 8.5, 'High\nCrime', ha='center', va='center', fontsize=12,
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="lightcoral", alpha=0.8))
+    
+    axes[1,0].set_title('Decision Tree Regions\nRectangular Decision Boundaries')
+    axes[1,0].set_xlabel('Socioeconomic Factor 1')
+    axes[1,0].set_ylabel('Socioeconomic Factor 2')
+    axes[1,0].grid(True, alpha=0.3)
+    
+    # Plot 4: Linear Regression (for continuous prediction)
+    # Convert to continuous target for regression visualization
+    y_continuous = y_all * 0.3 + np.random.normal(0, 0.1, len(y_all))  # Convert to continuous
+    
+    # Create scatter plot with color intensity representing crime rate
+    scatter = axes[1,1].scatter(X_all[:, 0], X_all[:, 1], c=y_continuous, cmap='viridis', 
+                               s=60, alpha=0.8, edgecolors='black')
+    
+    # Fit a simple linear regression plane (shown as contours)
+    # Create regression surface
+    Z_lr = 0.1 * xx + 0.15 * yy - 0.5
+    contour = axes[1,1].contour(xx, yy, Z_lr, levels=8, alpha=0.6, colors='white')
+    axes[1,1].clabel(contour, inline=True, fontsize=8, fmt='%.1f')
+    
+    axes[1,1].set_title('Linear Regression Prediction\nContinuous Crime Rate Estimation')
+    axes[1,1].set_xlabel('Socioeconomic Factor 1')
+    axes[1,1].set_ylabel('Socioeconomic Factor 2')
+    
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=axes[1,1])
+    cbar.set_label('Predicted Crime Rate')
+    axes[1,1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+
+print("Algorithm Visualization Code Ready!")
+print("=" * 50)
+print("\nTo generate all visualizations, run:")
+print("visualize_all_algorithms()")
+print("\nTo generate algorithm comparison plot, run:")
+print("plot_algorithm_comparison()")
+print("\nTo generate individual visualizations:")
+print("- plot_knn_visualization()")
+print("- plot_linear_regression_visualization()")
+print("- plot_svm_visualization()")
+print("- plot_decision_tree_visualization()")
+
+# Example usage (uncomment to run):
+# visualize_all_algorithms()
+# plot_algorithm_comparison()
+
+
+
+# =============================================================================
+# FIXED VISUALIZATION CODE - EXECUTE THE FUNCTIONS
+# =============================================================================
+
+# Add these lines at the end of your visualization code to actually execute:
+
+# Method 1: Execute all visualizations immediately
+if __name__ == "__main__":
+    print("Generating all algorithm visualizations...")
+    
+    # Execute each visualization function
+    try:
+        print("\n1. Generating KNN Visualization...")
+        plot_knn_visualization()
+        
+        print("\n2. Generating Linear Regression Visualization...")
+        plot_linear_regression_visualization()
+        
+        print("\n3. Generating SVM Visualization...")
+        plot_svm_visualization()
+        
+        print("\n4. Generating Decision Tree Visualization...")
+        plot_decision_tree_visualization()
+        
+        print("\n5. Generating Algorithm Comparison...")
+        plot_algorithm_comparison()
+        
+        print("\nAll visualizations completed successfully!")
+        
+    except Exception as e:
+        print(f"Error generating visualizations: {e}")
+        print("Make sure all required libraries are installed:")
+        print("pip install matplotlib seaborn scikit-learn numpy pandas")
+
+# =============================================================================
+# ALTERNATIVE: SIMPLE EXECUTION COMMANDS
+# =============================================================================
+
+# Or simply run these commands directly in your Jupyter notebook:
+
+# Uncomment and run each line individually:
+# plot_knn_visualization()
+# plot_linear_regression_visualization() 
+# plot_svm_visualization()
+# plot_decision_tree_visualization()
+# plot_algorithm_comparison()
+
+# =============================================================================
+# TROUBLESHOOTING STEPS
+# =============================================================================
+
+def check_dependencies():
+    """Check if all required libraries are available"""
+    try:
+        import matplotlib.pyplot as plt
+        print("✓ matplotlib available")
+    except ImportError:
+        print("✗ matplotlib missing - install with: pip install matplotlib")
+    
+    try:
+        import seaborn as sns
+        print("✓ seaborn available")
+    except ImportError:
+        print("✗ seaborn missing - install with: pip install seaborn")
+    
+    try:
+        import numpy as np
+        print("✓ numpy available")
+    except ImportError:
+        print("✗ numpy missing - install with: pip install numpy")
+    
+    try:
+        import pandas as pd
+        print("✓ pandas available")
+    except ImportError:
+        print("✗ pandas missing - install with: pip install pandas")
+    
+    try:
+        from sklearn.datasets import make_regression
+        print("✓ scikit-learn available")
+    except ImportError:
+        print("✗ scikit-learn missing - install with: pip install scikit-learn")
+
+# Run this first to check your environment:
+# check_dependencies()
+
+# =============================================================================
+# SIMPLIFIED SINGLE PLOT VERSION (if the full version doesn't work)
+# =============================================================================
+
+def simple_knn_plot():
+    """Simple KNN visualization that should definitely work"""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Generate simple sample data
+    np.random.seed(42)
+    class1_x = [1, 1.5, 2, 1.8, 1.2]
+    class1_y = [1, 1.2, 1.5, 1.8, 1.1]
+    class2_x = [3, 3.2, 3.5, 3.8, 3.1]
+    class2_y = [3, 3.1, 3.3, 3.5, 2.9]
+    
+    # Plot
+    plt.figure(figsize=(8, 6))
+    plt.scatter(class1_x, class1_y, c='blue', s=100, label='Low Crime', alpha=0.7)
+    plt.scatter(class2_x, class2_y, c='red', s=100, label='High Crime', alpha=0.7)
+    plt.scatter(2.5, 2.5, c='black', s=200, marker='*', label='New Point')
+    
+    plt.title('K-NN Algorithm Demonstration')
+    plt.xlabel('Socioeconomic Factor 1')
+    plt.ylabel('Socioeconomic Factor 2')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+def simple_linear_regression_plot():
+    """Simple linear regression visualization"""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    np.random.seed(42)
+    x = np.linspace(0, 10, 50)
+    y = 0.5 * x + 2 + np.random.normal(0, 0.5, 50)
+    
+    plt.figure(figsize=(8, 6))
+    plt.scatter(x, y, alpha=0.6, label='Community Data')
+    
+    # Best fit line
+    coeffs = np.polyfit(x, y, 1)
+    y_pred = coeffs[0] * x + coeffs[1]
+    plt.plot(x, y_pred, 'r-', linewidth=2, label=f'Best Fit: y = {coeffs[0]:.2f}x + {coeffs[1]:.2f}')
+    
+    plt.title('Linear Regression: Crime Rate vs Poverty Level')
+    plt.xlabel('Poverty Level')
+    plt.ylabel('Crime Rate')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+# =============================================================================
+# EXECUTE SIMPLE PLOTS (USE THESE IF COMPLEX ONES FAIL)
+# =============================================================================
+
+print("Running simple visualization tests...")
+print("If you see plots below, your environment is working correctly.")
+
+# Uncomment these lines to test:
+# simple_knn_plot()
+# simple_linear_regression_plot()
+
+print("\nTo run visualizations, execute one of these options:")
+print("Option 1: Run all at once")
+print("  exec(open('your_visualization_file.py').read())")
+print("\nOption 2: Run individual functions")
+print("  plot_knn_visualization()")
+print("  plot_linear_regression_visualization()")
+print("  plot_svm_visualization()")
+print("  plot_decision_tree_visualization()")
+print("\nOption 3: Test with simple versions first")
+print("  simple_knn_plot()")
+print("  simple_linear_regression_plot()")

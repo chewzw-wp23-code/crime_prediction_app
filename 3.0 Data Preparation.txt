@@ -1,0 +1,631 @@
+3.0 Data Preparation
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.impute import SimpleImputer
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+import warnings
+warnings.filterwarnings('ignore')
+
+print("3.0 Data Preparation")
+print("Communities and Crime Dataset - Data Cleaning and Processing")
+
+# =============================================================================
+# 3.1 Data Selection
+# =============================================================================
+
+# Load the Communities and Crime dataset from Excel
+print("Loading dataset from data2.xlsx...")
+try:
+    df = pd.read_excel('data2.xlsx')
+    print(f"Dataset loaded successfully: {df.shape[0]} communities, {df.shape[1]} variables")
+except Exception as e:
+    print(f"Error loading Excel file: {e}")
+    print("Please ensure data2.xlsx is in the correct location")
+
+# Display basic information about the dataset
+print(f"\nDataset Information:")
+print(f"Shape: {df.shape}")
+print(f"Columns: {df.columns.tolist()[:10]}..." if len(df.columns) > 10 else f"Columns: {df.columns.tolist()}")
+
+# Check for any unnamed or problematic columns
+unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
+if unnamed_cols:
+    print(f"Found {len(unnamed_cols)} unnamed columns - removing them")
+    df = df.drop(columns=unnamed_cols)
+
+print(f"After cleaning column names: {df.shape}")
+
+# Display first few rows to understand data structure
+print(f"\nFirst 5 rows of dataset:")
+print(df.head())
+
+# Check data types
+print(f"\nData types summary:")
+print(df.dtypes.value_counts())
+
+# Convert '?' to NaN if present (common in Communities and Crime dataset)
+df = df.replace('?', np.nan)
+
+# Convert numeric columns to proper numeric types
+numeric_cols = []
+for col in df.columns:
+    if col not in ['state', 'county', 'community', 'communityname', 'fold']:
+        try:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            numeric_cols.append(col)
+        except:
+            pass
+
+print(f"Converted {len(numeric_cols)} columns to numeric type")
+
+# Identify potential identifier columns (non-predictive)
+identifier_candidates = ['state', 'county', 'community', 'communityname', 'fold', 'Unnamed', 'index', 'id']
+identifier_cols = [col for col in df.columns if any(id_name in col.lower() for id_name in identifier_candidates)]
+
+if identifier_cols:
+    print(f"Identified potential identifier columns: {identifier_cols}")
+    df_selected = df.drop(columns=identifier_cols)
+    print(f"After removing identifiers: {df_selected.shape}")
+else:
+    df_selected = df.copy()
+    print("No obvious identifier columns found - keeping all columns")
+
+# =============================================================================
+# 3.2 Data Cleaning
+# =============================================================================
+
+print(f"\n3.2 Data Cleaning")
+print("Analyzing missing values and data quality issues")
+
+# Comprehensive missing values analysis
+missing_counts = df_selected.isnull().sum()
+missing_percentages = (missing_counts / len(df_selected)) * 100
+
+print(f"\nMissing Values Analysis:")
+print(f"Total variables: {len(df_selected.columns)}")
+print(f"Variables with no missing data: {sum(missing_counts == 0)}")
+print(f"Variables with missing data: {sum(missing_counts > 0)}")
+
+# Display variables with significant missing data
+significant_missing = missing_percentages[missing_percentages > 5].sort_values(ascending=False)
+if len(significant_missing) > 0:
+    print(f"\nVariables with >5% missing data:")
+    for i, (var, pct) in enumerate(significant_missing.items(), 1):
+        count = missing_counts[var]
+        print(f"{i}. {var}: {count} ({pct:.2f}%)")
+else:
+    print("No variables have >5% missing data")
+
+# Check for patterns similar to Communities and Crime dataset
+high_missing_vars = missing_percentages[missing_percentages > 50]
+if len(high_missing_vars) > 0:
+    print(f"\nThe missing values mostly occur in the following variables whereby:")
+    for i, (var, pct) in enumerate(high_missing_vars.items(), 1):
+        count = missing_counts[var]
+        print(f"{i}. {var}: {count} ({pct:.2f}%)")
+    
+    print(f"\nThe missing values are either represented with NaN or specific codes.")
+    print(f"Pattern suggests systematic data collection limitations (similar to LEMAS survey).")
+
+# Visualize missing data patterns
+fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+# Missing data heatmap (sample of variables for readability)
+sample_size = min(20, len(df_selected.columns))
+sample_cols = df_selected.columns[:sample_size]
+missing_matrix = df_selected[sample_cols].isnull()
+
+sns.heatmap(missing_matrix.T, yticklabels=True, xticklabels=False,
+            cmap='RdBu_r', cbar_kws={'label': 'Missing (Red) vs Available (Blue)'}, ax=axes[0,0])
+axes[0,0].set_title('Missing Data Pattern Matrix (Sample Variables)', fontweight='bold')
+axes[0,0].set_ylabel('Variables')
+
+# Missing percentages bar chart
+if len(significant_missing) > 0:
+    top_missing = significant_missing.head(10)
+    axes[0,1].barh(range(len(top_missing)), top_missing.values, color='red', alpha=0.7)
+    axes[0,1].set_yticks(range(len(top_missing)))
+    axes[0,1].set_yticklabels([name[:15] + '...' if len(name) > 15 else name for name in top_missing.index])
+    axes[0,1].set_xlabel('Missing Percentage (%)')
+    axes[0,1].set_title('Variables with Highest Missing Data', fontweight='bold')
+else:
+    axes[0,1].text(0.5, 0.5, 'No significant\nmissing data', ha='center', va='center', transform=axes[0,1].transAxes)
+    axes[0,1].set_title('Missing Data Analysis', fontweight='bold')
+
+# Data completeness distribution
+complete_vars = sum(missing_percentages == 0)
+partial_vars = sum((missing_percentages > 0) & (missing_percentages < 50))
+high_missing_vars_count = sum(missing_percentages >= 50)
+
+categories = ['Complete\n(0% missing)', 'Partial\n(1-49% missing)', 'High Missing\n(≥50% missing)']
+counts = [complete_vars, partial_vars, high_missing_vars_count]
+colors = ['green', 'orange', 'red']
+
+axes[1,0].pie(counts, labels=categories, colors=colors, autopct='%1.1f%%', startangle=90)
+axes[1,0].set_title('Variable Completeness Distribution', fontweight='bold')
+
+# Impact of different cleaning strategies
+strategies = ['No Cleaning', 'Remove >80%\nMissing', 'Remove >50%\nMissing', 'Complete\nCases Only']
+sample_sizes = [
+    len(df_selected),
+    len(df_selected.loc[:, missing_percentages < 80]),
+    len(df_selected.loc[:, missing_percentages < 50]),
+    len(df_selected.dropna())
+]
+
+axes[1,1].bar(strategies, sample_sizes, color=['blue', 'green', 'orange', 'red'], alpha=0.7)
+axes[1,1].set_ylabel('Available Communities')
+axes[1,1].set_title('Impact of Missing Data Strategies', fontweight='bold')
+axes[1,1].tick_params(axis='x', rotation=45)
+
+# Add value labels
+for i, v in enumerate(sample_sizes):
+    axes[1,1].text(i, v + len(df_selected)*0.01, str(v), ha='center', fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+# =============================================================================
+# 3.2.1 Missing Data Treatment Strategy
+# =============================================================================
+
+print(f"\n3.2.1 Missing Data Treatment")
+
+# Strategy: Remove variables with excessive missing data, then impute remaining
+high_missing_threshold = 80  # Remove variables with >80% missing data
+low_missing_vars = missing_percentages[missing_percentages <= high_missing_threshold].index
+removed_vars = missing_percentages[missing_percentages > high_missing_threshold]
+
+if len(removed_vars) > 0:
+    print(f"Removing {len(removed_vars)} variables with >{high_missing_threshold}% missing data:")
+    for var, pct in removed_vars.items():
+        print(f"  - {var}: {pct:.1f}% missing")
+
+df_primary = df_selected[low_missing_vars].copy()
+print(f"Primary dataset after removing high-missing variables: {df_primary.shape}")
+
+# Handle remaining missing values
+remaining_missing = df_primary.isnull().sum()
+vars_to_impute = remaining_missing[remaining_missing > 0]
+
+if len(vars_to_impute) > 0:
+    print(f"\nImputing remaining missing values in {len(vars_to_impute)} variables:")
+    for var, count in vars_to_impute.items():
+        pct = (count / len(df_primary)) * 100
+        print(f"  - {var}: {count} ({pct:.1f}%)")
+    
+    # Identify target variable (likely to be crime-related)
+    target_candidates = [col for col in df_primary.columns if 
+                        any(keyword in col.lower() for keyword in ['crime', 'violent', 'murder', 'assault'])]
+    
+    if target_candidates:
+        target_var = target_candidates[0]  # Use first crime-related variable as target
+        print(f"Identified target variable: {target_var}")
+        
+        # Separate features and target
+        features = df_primary.drop(target_var, axis=1)
+        target = df_primary[target_var]
+    else:
+        # If no obvious target, treat all as features
+        features = df_primary
+        target = None
+        print("No obvious target variable identified - treating all as features")
+    
+    # Apply multiple imputation
+    print("Applying multiple imputation using IterativeImputer...")
+    imputer = IterativeImputer(random_state=42, max_iter=10)
+    
+    try:
+        features_imputed = pd.DataFrame(
+            imputer.fit_transform(features),
+            columns=features.columns,
+            index=features.index
+        )
+        
+        # Combine back with target if exists
+        if target is not None:
+            df_cleaned = pd.concat([features_imputed, target], axis=1)
+        else:
+            df_cleaned = features_imputed
+            
+        print("Multiple imputation completed successfully")
+        
+    except Exception as e:
+        print(f"Multiple imputation failed: {e}")
+        print("Applying simple median imputation instead...")
+        
+        # Fallback to simple imputation
+        imputer_simple = SimpleImputer(strategy='median')
+        features_imputed = pd.DataFrame(
+            imputer_simple.fit_transform(features),
+            columns=features.columns,
+            index=features.index
+        )
+        
+        if target is not None:
+            df_cleaned = pd.concat([features_imputed, target], axis=1)
+        else:
+            df_cleaned = features_imputed
+        
+        print("Simple imputation completed")
+
+else:
+    df_cleaned = df_primary.copy()
+    print("No missing values to impute")
+
+# Verify cleaning results
+final_missing = df_cleaned.isnull().sum()
+print(f"\nCleaning Results:")
+print(f"• Original dataset: {df_selected.shape}")
+print(f"• Cleaned dataset: {df_cleaned.shape}")
+print(f"• Remaining missing values: {final_missing.sum()}")
+
+# =============================================================================
+# 3.3 Feature Engineering
+# =============================================================================
+
+print(f"\n3.3 Feature Engineering")
+print("Creating composite features relevant for crime prediction")
+
+def create_composite_features(df):
+    """Create composite features based on available variables"""
+    df_enhanced = df.copy()
+    features_created = []
+    
+    # Economic indicators
+    income_vars = [col for col in df.columns if 'income' in col.lower() or 'poverty' in col.lower()]
+    if len(income_vars) >= 2:
+        # Create economic stress index
+        economic_components = []
+        for var in income_vars:
+            if 'poverty' in var.lower():
+                economic_components.append(df[var])  # Poverty increases stress
+            else:
+                economic_components.append(1 - df[var])  # Income decreases stress (invert)
+        
+        if economic_components:
+            df_enhanced['EconomicStressIndex'] = pd.concat(economic_components, axis=1).mean(axis=1)
+            features_created.append('EconomicStressIndex')
+    
+    # Family structure indicators
+    family_vars = [col for col in df.columns if any(keyword in col.lower() for keyword in 
+                                                   ['family', 'divorce', 'marriage', 'parent'])]
+    if len(family_vars) >= 2:
+        # Create family stability score
+        family_components = []
+        for var in family_vars[:3]:  # Use first 3 family variables
+            if 'divorce' in var.lower():
+                family_components.append(1 - df[var])  # Invert divorce (more divorce = less stability)
+            else:
+                family_components.append(df[var])
+        
+        if family_components:
+            df_enhanced['FamilyStabilityScore'] = pd.concat(family_components, axis=1).mean(axis=1)
+            features_created.append('FamilyStabilityScore')
+    
+    # Housing indicators
+    housing_vars = [col for col in df.columns if 'hous' in col.lower() or 'rent' in col.lower() or 'own' in col.lower()]
+    if len(housing_vars) >= 2:
+        # Create housing quality index from available housing variables
+        housing_sample = housing_vars[:3]  # Use first 3 housing variables
+        df_enhanced['HousingQualityIndex'] = df[housing_sample].mean(axis=1)
+        features_created.append('HousingQualityIndex')
+    
+    # Demographic diversity (if race/ethnicity variables exist)
+    race_vars = [col for col in df.columns if any(keyword in col.lower() for keyword in 
+                                                 ['race', 'white', 'black', 'asian', 'hispanic', 'hisp'])]
+    if len(race_vars) >= 3:
+        # Calculate demographic diversity index
+        race_data = df[race_vars[:4]]  # Use first 4 race variables
+        diversity_index = 1 - (race_data ** 2).sum(axis=1)
+        df_enhanced['DemographicDiversityIndex'] = diversity_index
+        features_created.append('DemographicDiversityIndex')
+    
+    return df_enhanced, features_created
+
+# Apply feature engineering
+df_final, new_features = create_composite_features(df_cleaned)
+
+print(f"Feature engineering results:")
+print(f"• Original features: {df_cleaned.shape[1]}")
+print(f"• Enhanced dataset: {df_final.shape[1]}")
+print(f"• New composite features created: {len(new_features)}")
+if new_features:
+    print(f"• New features: {new_features}")
+
+# =============================================================================
+# 3.4 Data Transformation
+# =============================================================================
+
+print(f"\n3.4 Data Transformation")
+print("Applying necessary data transformations for modeling readiness")
+
+def apply_data_transformations(df):
+    """Apply comprehensive data transformations"""
+    df_transformed = df.copy()
+    transformation_log = []
+    
+    # 1. Handle categorical variables if present
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
+    if len(categorical_cols) > 0:
+        print(f"\nCategorical Variables Transformation:")
+        for col in categorical_cols:
+            unique_values = df[col].nunique()
+            print(f"  {col}: {unique_values} unique values")
+            
+            if unique_values <= 10:  # Apply one-hot encoding for low cardinality
+                dummies = pd.get_dummies(df[col], prefix=col, drop_first=True)
+                df_transformed = pd.concat([df_transformed.drop(col, axis=1), dummies], axis=1)
+                transformation_log.append(f"One-hot encoded {col}")
+            else:  # Apply label encoding for high cardinality
+                from sklearn.preprocessing import LabelEncoder
+                le = LabelEncoder()
+                df_transformed[col] = le.fit_transform(df[col].astype(str))
+                transformation_log.append(f"Label encoded {col}")
+    
+    # 2. Normalize/Standardize numerical variables
+    numeric_cols = df_transformed.select_dtypes(include=[np.number]).columns
+    
+    # Check if data needs normalization (not already in 0-1 range)
+    needs_normalization = []
+    for col in numeric_cols:
+        col_min, col_max = df_transformed[col].min(), df_transformed[col].max()
+        if col_min < -0.1 or col_max > 1.1:  # Allow small tolerance for already normalized data
+            needs_normalization.append(col)
+    
+    if needs_normalization:
+        print(f"\nNormalization Applied to {len(needs_normalization)} variables:")
+        from sklearn.preprocessing import MinMaxScaler
+        scaler = MinMaxScaler()
+        
+        # Apply normalization to variables that need it
+        df_transformed[needs_normalization] = scaler.fit_transform(df_transformed[needs_normalization])
+        transformation_log.append(f"Normalized {len(needs_normalization)} variables to 0-1 range")
+        
+        # Show sample of normalized ranges
+        for col in needs_normalization[:5]:  # Show first 5
+            new_min, new_max = df_transformed[col].min(), df_transformed[col].max()
+            print(f"  {col}: [{new_min:.3f}, {new_max:.3f}]")
+    else:
+        print(f"\nData already appears normalized (0-1 range)")
+    
+    # 3. Handle skewed distributions
+    print(f"\nSkewness Analysis and Transformation:")
+    from scipy import stats
+    
+    highly_skewed = []
+    for col in numeric_cols[:10]:  # Check first 10 numeric columns
+        skewness = stats.skew(df_transformed[col].dropna())
+        if abs(skewness) > 2:  # Highly skewed
+            highly_skewed.append((col, skewness))
+    
+    if highly_skewed:
+        print(f"Found {len(highly_skewed)} highly skewed variables:")
+        for col, skew_val in highly_skewed:
+            print(f"  {col}: skewness = {skew_val:.3f}")
+            
+            # Apply log transformation for positive skewed variables
+            if skew_val > 2 and (df_transformed[col] > 0).all():
+                df_transformed[f'{col}_log'] = np.log1p(df_transformed[col])
+                transformation_log.append(f"Log transformed {col}")
+                print(f"    Applied log transformation -> {col}_log")
+    else:
+        print("No highly skewed variables detected")
+    
+    # 4. Create time-based transformations if date/time columns exist
+    potential_time_cols = [col for col in df.columns if any(keyword in col.lower() 
+                          for keyword in ['date', 'time', 'day', 'month', 'year'])]
+    
+    if potential_time_cols:
+        print(f"\nTime-based Transformation:")
+        for col in potential_time_cols:
+            if col in df_transformed.columns:
+                try:
+                    # Try to convert to datetime
+                    df_transformed[col] = pd.to_datetime(df_transformed[col], errors='coerce')
+                    
+                    # Extract time components
+                    df_transformed[f'{col}_year'] = df_transformed[col].dt.year
+                    df_transformed[f'{col}_month'] = df_transformed[col].dt.month
+                    df_transformed[f'{col}_dayofweek'] = df_transformed[col].dt.dayofweek
+                    
+                    transformation_log.append(f"Extracted time components from {col}")
+                    print(f"  Extracted year, month, dayofweek from {col}")
+                except:
+                    print(f"  Could not process {col} as datetime")
+    
+    # 5. Data type optimization
+    print(f"\nData Type Optimization:")
+    memory_before = df_transformed.memory_usage(deep=True).sum() / 1024**2
+    
+    # Optimize integer columns
+    for col in df_transformed.select_dtypes(include=['int64']).columns:
+        col_min, col_max = df_transformed[col].min(), df_transformed[col].max()
+        if col_min >= 0:
+            if col_max <= 255:
+                df_transformed[col] = df_transformed[col].astype('uint8')
+            elif col_max <= 65535:
+                df_transformed[col] = df_transformed[col].astype('uint16')
+            elif col_max <= 4294967295:
+                df_transformed[col] = df_transformed[col].astype('uint32')
+        else:
+            if col_min >= -128 and col_max <= 127:
+                df_transformed[col] = df_transformed[col].astype('int8')
+            elif col_min >= -32768 and col_max <= 32767:
+                df_transformed[col] = df_transformed[col].astype('int16')
+            elif col_min >= -2147483648 and col_max <= 2147483647:
+                df_transformed[col] = df_transformed[col].astype('int32')
+    
+    # Optimize float columns
+    for col in df_transformed.select_dtypes(include=['float64']).columns:
+        df_transformed[col] = pd.to_numeric(df_transformed[col], downcast='float')
+    
+    memory_after = df_transformed.memory_usage(deep=True).sum() / 1024**2
+    memory_saved = memory_before - memory_after
+    
+    print(f"  Memory usage: {memory_before:.2f} MB -> {memory_after:.2f} MB")
+    print(f"  Memory saved: {memory_saved:.2f} MB ({memory_saved/memory_before*100:.1f}%)")
+    
+    return df_transformed, transformation_log
+
+# Apply all transformations
+df_transformed, transformations_applied = apply_data_transformations(df_final)
+
+print(f"\nTransformation Summary:")
+print(f"• Original dataset: {df_final.shape}")
+print(f"• Transformed dataset: {df_transformed.shape}")
+print(f"• Transformations applied: {len(transformations_applied)}")
+
+if transformations_applied:
+    print("• Applied transformations:")
+    for i, transformation in enumerate(transformations_applied, 1):
+        print(f"  {i}. {transformation}")
+
+# =============================================================================
+# 3.5 Data Integration and Final Preparation
+# =============================================================================
+
+print(f"\n3.5 Data Integration and Final Preparation")
+print("Preparing final dataset for modeling")
+
+# Final data validation
+print(f"\nFinal Dataset Validation:")
+print(f"• Shape: {df_transformed.shape}")
+print(f"• Missing values: {df_transformed.isnull().sum().sum()}")
+print(f"• Data types: {df_transformed.dtypes.value_counts().to_dict()}")
+
+# Create train-test splits for modeling readiness
+from sklearn.model_selection import train_test_split
+
+# Identify target variable for splitting
+crime_keywords = ['crime', 'violent', 'murder', 'assault', 'burglary', 'theft']
+target_candidates = [col for col in df_transformed.columns if 
+                    any(keyword in col.lower() for keyword in crime_keywords)]
+
+if target_candidates:
+    target_var = target_candidates[0]
+    print(f"\nPreparing train-test splits with target: {target_var}")
+    
+    X = df_transformed.drop(target_var, axis=1)
+    y = df_transformed[target_var]
+    
+    # Create 70-20-10 split (train-validation-test)
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X, y, test_size=0.3, random_state=42, stratify=None)
+    
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.33, random_state=42, stratify=None)  # 0.33 of 0.3 = 0.1 total
+    
+    print(f"Dataset splits created:")
+    print(f"• Training set: {X_train.shape[0]} communities ({X_train.shape[0]/len(X)*100:.1f}%)")
+    print(f"• Validation set: {X_val.shape[0]} communities ({X_val.shape[0]/len(X)*100:.1f}%)")
+    print(f"• Test set: {X_test.shape[0]} communities ({X_test.shape[0]/len(X)*100:.1f}%)")
+    
+    # Save splits for modeling
+    splits_data = {
+        'X_train': X_train, 'y_train': y_train,
+        'X_val': X_val, 'y_val': y_val, 
+        'X_test': X_test, 'y_test': y_test
+    }
+else:
+    print(f"\nNo target variable identified - dataset prepared for unsupervised learning")
+    splits_data = None
+
+# =============================================================================
+# 3.6 Data Quality Assessment and Validation
+# =============================================================================
+
+print(f"\n3.6 Data Quality Assessment and Validation")
+
+# Basic data quality checks
+print(f"Dataset Quality Summary:")
+print(f"• Final dataset shape: {df_final.shape}")
+print(f"• Total missing values: {df_final.isnull().sum().sum()}")
+print(f"• Numeric variables: {len(df_final.select_dtypes(include=[np.number]).columns)}")
+
+# Check data ranges (should be normalized for many datasets)
+numeric_cols = df_final.select_dtypes(include=[np.number]).columns
+if len(numeric_cols) > 0:
+    print(f"\nData Range Analysis (first 5 numeric variables):")
+    for col in numeric_cols[:5]:
+        min_val, max_val = df_final[col].min(), df_final[col].max()
+        mean_val = df_final[col].mean()
+        print(f"  {col}: [{min_val:.3f}, {max_val:.3f}], mean: {mean_val:.3f}")
+
+# Identify potential target variable and show correlations
+crime_keywords = ['crime', 'violent', 'murder', 'assault', 'burglary', 'theft']
+target_candidates = [col for col in df_final.columns if 
+                    any(keyword in col.lower() for keyword in crime_keywords)]
+
+if target_candidates and len(numeric_cols) > 1:
+    target_var = target_candidates[0]
+    print(f"\nCorrelation Analysis with {target_var}:")
+    
+    correlations = df_final.corr()[target_var].abs().sort_values(ascending=False)
+    strong_predictors = correlations[correlations > 0.3].drop(target_var, errors='ignore')
+    
+    if len(strong_predictors) > 0:
+        print(f"Strong predictors (|correlation| > 0.3):")
+        for i, (var, corr) in enumerate(strong_predictors.head(5).items(), 1):
+            print(f"  {i}. {var}: {corr:.3f}")
+    else:
+        print("No variables with |correlation| > 0.3 found")
+        
+        # Show top correlations regardless of threshold
+        top_corr = correlations.drop(target_var, errors='ignore').head(5)
+        print(f"Top correlations:")
+        for var, corr in top_corr.items():
+            print(f"  {var}: {corr:.3f}")
+
+# Outlier analysis
+outlier_counts = {}
+for col in numeric_cols[:10]:  # Check first 10 numeric columns
+    Q1 = df_final[col].quantile(0.25)
+    Q3 = df_final[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    outliers = ((df_final[col] < lower_bound) | (df_final[col] > upper_bound)).sum()
+    outlier_counts[col] = outliers
+
+if outlier_counts:
+    print(f"\nOutlier Analysis (top variables):")
+    sorted_outliers = sorted(outlier_counts.items(), key=lambda x: x[1], reverse=True)
+    for var, count in sorted_outliers[:5]:
+        pct = (count / len(df_final)) * 100
+        print(f"  {var}: {count} outliers ({pct:.1f}%)")
+
+# =============================================================================
+# Final Summary
+# =============================================================================
+
+print(f"\n" + "="*60)
+print("DATA PREPARATION COMPLETED SUCCESSFULLY")
+print("="*60)
+
+print(f"Final Dataset Summary:")
+print(f"• Communities: {df_final.shape[0]}")
+print(f"• Total features: {df_final.shape[1]}")
+print(f"• Missing values: {df_final.isnull().sum().sum()}")
+print(f"• Data quality: {'High' if df_final.isnull().sum().sum() == 0 else 'Good'}")
+
+print(f"\nKey Preprocessing Steps Completed:")
+print(f"1. ✓ Data loading and initial cleaning")
+print(f"2. ✓ Missing data analysis and treatment")
+print(f"3. ✓ Feature engineering ({len(new_features)} new features)")
+print(f"4. ✓ Data validation and quality assessment")
+
+print(f"\nDataset ready for 4.0 Modeling phase")
+print(f"Recommended: Focus on variables with strong correlations to crime outcomes")
+
+# Save the cleaned dataset
+output_filename = 'communities_cleaned.csv'
+df_final.to_csv(output_filename, index=False)
+print(f"Cleaned dataset saved as '{output_filename}'")
+
+# Display final data sample
+print(f"\nFinal dataset preview:")
+print(df_final.head())
